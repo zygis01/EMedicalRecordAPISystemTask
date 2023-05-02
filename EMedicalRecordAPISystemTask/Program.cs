@@ -1,3 +1,4 @@
+using EMedicalRecordAPISystemTask.BussinessLogic.Interfaces;
 using EMedicalRecordAPISystemTask.DBContext;
 using EMedicalRecordAPISystemTask.Interfaces;
 using EMedicalRecordAPISystemTask.Options;
@@ -10,49 +11,53 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var configBuilder = new ConfigurationBuilder();
-configBuilder.AddJsonFile("appsettings.json");
+var configBuilder = new ConfigurationBuilder()
+    .SetBasePath(AppContext.BaseDirectory)
+    .AddJsonFile("appsettings.json");
+
 IConfiguration config = configBuilder.Build();
 
 var jwtOptions = new JwtOptions(config);
 builder.Configuration.GetSection("JWT").Bind(jwtOptions);
 builder.Services.AddSingleton(jwtOptions);
 builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddScoped<IJwtService, JwtService>();
+builder.Services.AddScoped<ProfilePicService>();
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
-SetUpSwagger(builder.Services);
+builder.Services.AddSwaggerGen(options =>
+{
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Scheme = "Bearer",
+        BearerFormat = "JWT",
+        In = ParameterLocation.Header,
+        Name = "Authorization",
+        Description = "Bearer Authentication with JWT Token",
+        Type = SecuritySchemeType.Http
+    });
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Id = "Bearer",
+                    Type = ReferenceType.SecurityScheme
+                }
+            },
+            new List<string>()
+        }
+    });
+});
+
 SetUpAuthentication(builder.Services);
 
-void SetUpSwagger(IServiceCollection services)
+builder.Services.AddAuthorization(options =>
 {
-    services.AddSwaggerGen(options =>
-    {
-        options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-        {
-            Scheme = "Bearer",
-            BearerFormat = "JWT",
-            In = ParameterLocation.Header,
-            Name = "Authorization",
-            Description = "Bearer Authentication with JWT Token",
-            Type = SecuritySchemeType.Http
-        });
-        options.AddSecurityRequirement(new OpenApiSecurityRequirement
-        {
-            {
-                new OpenApiSecurityScheme
-                {
-                    Reference = new OpenApiReference
-                    {
-                        Id = "Bearer",
-                        Type = ReferenceType.SecurityScheme
-                    }
-                },
-                new List<string>()
-            }
-        });
-    });
-}
+    options.AddPolicy("Admin", policy => policy.RequireClaim("Admin"));
+});
 
 void SetUpAuthentication(IServiceCollection services)
 {
@@ -73,13 +78,9 @@ void SetUpAuthentication(IServiceCollection services)
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.Secret))
         };
     });
-    services.AddAuthorization(options =>
-    {
-        options.AddPolicy("Admin", policy => policy.RequireClaim("Admin"));
-    });
 }
 
-builder.Services.AddDbContext<EMedicalRecordDbContext>(options =>
+builder.Services.AddDbContext<IEMedicalRecordDbContext, EMedicalRecordDbContext>(options =>
 {
     options.UseSqlServer(builder.Configuration.GetConnectionString("LocalDatabase"));
 }, ServiceLifetime.Scoped, ServiceLifetime.Scoped);

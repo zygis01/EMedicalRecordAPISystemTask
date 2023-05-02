@@ -7,7 +7,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNet.Mvc" Version="5.2.9" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="6.0.16" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="6.0.16" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="6.0.16" />
@@ -17,9 +16,12 @@
     </PackageReference>
     <PackageReference Include="SixLabors.ImageSharp" Version="3.0.1" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
-    <PackageReference Include="Swashbuckle.AspNetCore.SwaggerGen" Version="6.5.0" />
-    <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" Version="6.5.0" />
-    <PackageReference Include="Swashbuckle.Core" Version="5.6.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EMedicalRecordAPISystemTask.AppLogic\EMedicalRecordAPISystemTask.AppLogic.csproj" />
+    <ProjectReference Include="..\EMedicalRecordAPISystemTask.BussinessLogic\EMedicalRecordAPISystemTask.Core.csproj" />
+    <ProjectReference Include="..\EMedicalRecordAPISystemTask.Infrastructure\EMedicalRecordAPISystemTask.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

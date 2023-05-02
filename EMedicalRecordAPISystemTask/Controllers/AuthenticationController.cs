@@ -1,13 +1,8 @@
-﻿using EMedicalRecordAPISystemTask.DBContext;
-using EMedicalRecordAPISystemTask.DTOs;
-using EMedicalRecordAPISystemTask.Options;
+﻿using EMedicalRecordAPISystemTask.DTOs;
+using EMedicalRecordAPISystemTask.Interfaces;
 using EMedicalRecordAPISystemTask.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
 
 namespace EMedicalRecordAPISystemTask.Controllers
 {
@@ -15,62 +10,29 @@ namespace EMedicalRecordAPISystemTask.Controllers
     [Route("[controller]")]
     public class AuthenticationController : ControllerBase
     {
-        private readonly IConfiguration _configuration;
-        private EMedicalRecordDbContext context;
+        private readonly IConfiguration configuration;
+        public IEMedicalRecordDbContext context;
+        public JwtService jwtService;
+        public UserRepository service;
+        public ProfilePicService pictureService;
 
-        public AuthenticationController(IConfiguration configuration, EMedicalRecordDbContext _context)
+        public AuthenticationController(IConfiguration _configuration, IEMedicalRecordDbContext _context)
         {
             context = _context;
-            _configuration = configuration;
+            configuration = _configuration;
+            jwtService = new JwtService(_configuration);
+            service = new UserRepository(context);
+            pictureService = new ProfilePicService();
         }
 
         [HttpPost("Login")]
-        public async Task<IActionResult> Login([FromBody] LoginDto loginDto)
+        public async Task<ActionResult<string>> Login([FromBody] LoginDto loginDto)
         {
-            UserRepository userRepo = new(context);
+            if (!await service.LoginAsync(loginDto.Username, loginDto.Password))
+                return BadRequest($"Bad username or password!");
 
-            // Validate request body
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(ModelState);
-            }
-
-            // Check if user exists in database
-            var user = await context.Users.SingleOrDefaultAsync(u => u.Username == loginDto.Username);
-            if (user == null)
-            {
-                return Unauthorized();
-            }
-
-            // Verify password hash
-            if (!userRepo.VerifyPasswordHash(loginDto.Password, user.PasswordHash, user.PasswordSalt))
-            {
-                return Unauthorized();
-            }
-
-            // Create JWT token
-            var claims = new List<Claim>
-            {
-                new Claim(ClaimTypes.Name, user.Username),
-                new Claim(ClaimTypes.Role, "User")
-            };
-
-            var jwtOptions = new JwtOptions(_configuration);
-            var secretKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.Secret));
-            var signingCredentials = new SigningCredentials(secretKey, SecurityAlgorithms.HmacSha256);
-            var expirationTime = DateTime.UtcNow.AddHours(jwtOptions.ExpirationHours);
-
-            var tokenOptions = new JwtSecurityToken
-                (
-                    issuer: jwtOptions.ValidIssuer,
-                    audience: jwtOptions.ValidAudience,
-                    claims: claims,
-                    expires: expirationTime,
-                    signingCredentials: signingCredentials
-                );
-            var tokenString = new JwtSecurityTokenHandler().WriteToken(tokenOptions);
-
-            return Ok(new { Token = tokenString });
+            string token = jwtService.GetJwtTokenUser(loginDto.Username);
+            return Ok(token);
         }
 
         [HttpPost("LoginAdmin")]
@@ -78,23 +40,14 @@ namespace EMedicalRecordAPISystemTask.Controllers
         {
             if (loginDto == null)
             {
-                return BadRequest("Invalid model");
+                return BadRequest("Wrong credentials!");
             }
-
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(ModelState);
-            }
-
-            UserRepository userRepo = new(context);
 
             var userFromDb = await context.Users.FirstOrDefaultAsync(u => u.Username == loginDto.Username && u.Role == "Admin");
 
-            if (userFromDb != null && userRepo.VerifyPasswordHash(loginDto.Password, userFromDb.PasswordHash, userFromDb.PasswordSalt))
+            if (userFromDb != null && await service.LoginAsync(loginDto.Username, loginDto.Password))
             {
-                var jwtService = new JwtService(_configuration); 
-
-                var tokenString = jwtService.GetJwtToken(userFromDb.Username);
+                var tokenString = jwtService.GetJwtTokenAdmin(userFromDb.Username, userFromDb.Role);
 
                 return Ok(new { Token = tokenString });
             }
@@ -106,50 +59,33 @@ namespace EMedicalRecordAPISystemTask.Controllers
         public async Task<IActionResult> RegisterNewUser([FromForm] UserDto userDto)
         {
             if (userDto == null)
-            {
                 return BadRequest("Invalid registration data!");
-            }
 
-            UserRepository userRepository = new UserRepository(context);
-
-            // Check if the username already exists in database
-            var existingUser = await context.GetUserByUsernameAsync(userDto.Username, context);
-
-            if (existingUser!= null)
-            {
+            var existingUser = await context.GetUserByUsernameAsync(userDto.Username);
+            if (existingUser != null)
                 return BadRequest("User with same username already exists!");
-            }
 
-
-            // Check if the personal code already exists in database
-            existingUser = await context.GetUserByPersonalCodeAsync(userDto.HumanInfoDto.PersonalCode, context);
-
-            if(existingUser != null)
-            {
+            existingUser = await context.GetUserByPersonalCodeAsync(userDto.HumanInfoDto.PersonalCode);
+            if (existingUser != null)
                 return BadRequest("User with same personal code already exists!");
-            }
 
-            // Check if the phone number already exists in database
-            existingUser = await context.GetUserByPhoneNumberAsync(userDto.HumanInfoDto.PhoneNum, context);
-
+            existingUser = await context.GetUserByPhoneNumberAsync(userDto.HumanInfoDto.PhoneNum);
             if (existingUser != null)
-            {
                 return BadRequest("User with same phone number already exists!");
-            }
 
-            // Check if the email already exists in database
-            existingUser = await context.GetUserByEmailAsync(userDto.HumanInfoDto.eMail, context);
-
+            existingUser = await context.GetUserByEmailAsync(userDto.HumanInfoDto.eMail);
             if (existingUser != null)
-            {
                 return BadRequest("User with same email already exists!");
-            }
 
-            var createdUser = await userRepository.CreateUserAsync(userDto);
-
-            if (createdUser == null)
+            if (userDto.HumanInfoDto.ProfilePic != null)
             {
-                return BadRequest("Could not create user!");
+                byte[] profilePicBytes = await pictureService.ProcessProfilePicAsync(userDto.HumanInfoDto.ProfilePic);
+
+                var createdUser = await service.CreateUserAsync(userDto.Username, userDto.Password, userDto.HumanInfoDto, userDto.AddressInfoDto, profilePicBytes);
+                if (createdUser == null)
+                {
+                    return BadRequest("Could not create user!");
+                }
             }
 
             return Ok("User registered successfully!");
